@@ -1,0 +1,1184 @@
+---
+title: A high-throughput alpha particle irradiation system for monitoring genome instability
+  and screening in human cell and yeast model systems - Analysis Code
+author: "Dustin D Pearson"
+date: "August 28 2019"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+editor_options:
+  chunk_output_type: console
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+##A few things before we start
+
+   0. ENSURE THAT TANGO WAS SET UP AS INSTRUCTED WITH THE DIRECTIONS FOUND WITHIN THE ONLINE SUPPLEMENTAL METHODS LABELLED "TANGO Setup". Remember, capitalization matters.
+
+  1. This analysis comes after TANGO image analysis. The two files that are exported from TANGO will be imported into R using this code.
+    1a. One file should be labelled gH2AX and will refer to the gH2AX objects qunatified by TANGO
+    1b. One file should be labelled Nuc and will refer to each cell analyzed by TANGO
+
+  2. We have built this analysis around DAPI staining and gH2AX immunofluorescent staining within human cells. If more channels are required to be analyzed, then this code will need to be modified.
+  
+  3. This code requires that all time points/conditions within the experiment are a analyzed by TANGO at the same time. TANGO has the ability to assign 'Tags' to images and cropped cells. TANGO starts its 'Tag' numbering at 0 and goes till 10.  Use these tags to identify different conditions. You will be prompted to assign values for the tags. 
+  
+  4. It is very important to have an untreated control in your image analysis, since this will be used to ascertain background staining artefacts. The untreated control must be tagged as Zero. 
+  
+  5. There will be variations in the data from variables such as different staining techniques or staining on different days. To minimize these variations, it is best to analyze one set of data originating from cells that were collected and stained at the same time. 
+  
+  6. Please read this code. It is annotated and had instructions for how to properly execute this analysis.
+  
+  7. The files exported from TANGO are .csv and are tab separated, not comma separated. See step 2 for more instructions.
+
+##To Start
+This is an R markdown file, it will run each set of code as you want. Within each code set, denoted by: ''' {r} ....some code .... ''', there will be a play button on the righthand side. Press the play button to run each set of code.
+
+#Make it easy to read
+Change the output of the Rmarkdown file to: "chunk output in console". This can be done by clicking on the setting 'gear' above.
+
+##Step 0 
+  1. If R was previously used, there may be some data within the global environment. This step removes any data or packages from the environment for smoother operation.
+  
+  2.Create a function to remove packages from the environment. This is necessary for the smooth functioning of the code.
+
+```{r}
+#1. Removes all previous data sets, for a clean start
+rm(list=ls(all=TRUE)) 
+
+#2. Create a function to detach packages. This analysis uses several packages which can conflict if not detached from the global environment.
+detach_package <- function(pkg, character.only = FALSE)
+{
+  if(!character.only)
+  {
+    pkg <- deparse(substitute(pkg))
+  }
+  search_item <- paste("package", pkg, sep = ":")
+  while(search_item %in% search())
+  {
+    detach(search_item, unload = TRUE, character.only = TRUE)
+  }
+}
+```
+##Step 1
+#Packages Needed
+
+First install the required packages. Use the command: install.packages("package_name_here"). Do this in the console below.
+
+  1. rmarkdown
+  2. tidyverse
+  3. reshape2
+  4. readxl
+  5. svDialogs
+  6. mixtools
+  7. scales
+  
+#Set your working directory
+
+Decide where R is to write the files. It will look something like: "C:/Users/Your_name/Desktop"
+  
+```{r set working directory}
+getwd() #see where R is reading from, adjust this for the correct folder destination. 
+setwd("D:\\Nov 10 2020 RPE SNM1C PNKP A549 DNApk C13 Alpha IR 0.7Gy\\RPE-1 N=3\\PNKP SNM1C A8\\new refined analysis") #set this to where you want R to be writing the files. Make sure to use forward slashes for Windows users, or double backslashes.
+```
+##Step 2
+# Load and Read CSV Files
+
+From the image analysis on TANGO, ensure that each experimental condition is appropriately tagged. TANGO only allows up to 11 experimental conditions, so if there are more experimental conditions, consider analyzing the images separately. One caveate is that this analysis requires that all conditions be within the same files (gH2AX and Nucleus files from TANGO). The separate files that will occur due to more than 11 conditions will then have to be combined into one, with the tag numbers manually adjusted. 
+
+IMPORTANT: The exported files from TANGO are .cvs, and are tab separated, NOT comma separated. 
+
+This next step imports .csv files. To import those into R, use: "read.csv(file.choose(), header = T, sep "\t", stringsAsFactors = FALSE)"
+
+With the final two files ready for analysis, this next step will allow the user to find the files from the folder. The exported files are labelled according to the structure, thus there should be two files, one 'gH2AX' and one 'Nucleus'.
+
+  1. Loads file browser for gH2AX file.
+  2. Loads file browser for Nucleus file.
+  
+#Assign 'Tag' values and Graph X-axis labels
+
+  3. To better graph the data, there will be pop up windows that will ask for the values of the 'Tags' assigned in TANGO. For example, if the images analyzed were a time course consisting of NIR, 0.5hr, 2hr, 4hr and 12hr, then five 'tags' should have been used in TANGO (#0-4). This part of the code will determine the number of 'tags' in a dataset then will generate the same number of pop-up windows to input those values. The tags will have to be entered in ascending order, starting from zero, as they were assigned in TANGO. 
+  4. Since not all conditions will be same, this part of the code will create another pop-up window to allow you to enter the experimental condition (i.e. time or dose or small molecule inhibitor concentrations). This value will be used to label the x-axis in the subsequent graphs. 
+
+```{r import the data and add tag values}
+#1.
+
+gh2ax <- read.csv(file.choose(), header = T, sep = "\t", stringsAsFactors = FALSE) #bring up a window to choose the appropriate file for gh2ax.
+
+#If the label of your images has any special characters or punctuation, they need to be replaced with underscores "_". Otherwise, R might interpret the special characters as instructions. Thus, those characters need to be removed. The below is a list of offending characters that will be removed from the 'label' column of the dataset. This can be changed and expanded as needed. 
+for(i in c(" ","-", "=", ":", ".")){
+gh2ax$Label <-  gsub(i, 
+                     "_", gh2ax$Label, fixed = TRUE) 
+} #cycles through each character in the "label" column and replaces it with the "_"
+
+#2.
+
+nuc <- read.csv(file.choose(), header = T, sep = "\t" ,stringsAsFactors = FALSE) #bring up a window to choose the appropriate file for nucleus.
+
+for(i in c(" ","-", "=", ":", ".")){
+nuc$Label <-  gsub(i, 
+                     "_", nuc$Label, fixed = TRUE)
+} #cycles through each character in the "label" column and replaces it with the "_"
+
+for(i in c(" ","-", "=", ":", ".")){
+nuc$nbObjects.gH2AX <-  gsub(i, 
+                     "_", nuc$nbObjects.gH2AX, fixed = TRUE)
+} #cycles through each character in the "nbObjects.gH2AX" column and replaces it with the "_"
+rm(i) #removes the variable "i"
+
+#3. Assign a value for the tags:
+library(svDialogs)
+tag <- c(min(nuc$tag):max(nuc$tag)) #gets a list of the tags within the files
+tag1 <- tag +1 #since R cannot count from 0 in a list, need to add one to the values so that the number of dialog boxes will be the same as the number of tags.
+as.list(tag1) #with the number of tags, creates a list for the loop to run through. 
+for(i in c(1:max(tag1))){ 
+  tag1[[i]] <- letters[i]
+  
+} #loops through each tag number in the list and assigns a letter as a variable
+tag1
+
+times <- list()
+for(j in tag1){ 
+  times[[j]] <- dlgInput("Enter tag value. The first dialog box is for the tag labelled 0. The number of subsequent boxes will be determined by the number of tags assigned. Please enter the values in accordance with increasing tag value.", Sys.info()["user"])$res
+
+}
+times <- as.data.frame(times)
+times <- t(times)
+Times <- as.vector(times[,1])
+
+#4. X-Axis label
+x_axis <- dlgInput("Enter the experimental condition that the 'tags' represent. This will be used as the x-axis label.", Sys.info()["user"])$res
+detach_package(svDialogs)
+```
+##Step 3
+# Clean up the data
+  
+  1. Delete column X__1 so that the order can be made by label, this step is not necessary, but cleans up the data frame.
+
+  2. Create a new column that indexes each cell based on the "Label", "nuc.idx" and "tag" in both the gH2AX and Nucleus data sets. This creates one column in each file (gH2AX and Nucleus) that will serve as a connection between the nuc and gh2ax data sets, so that the same cell can be easily identified within each file. 
+  
+```{r clean up data}
+gh2ax$X__1 <- NULL
+nuc$X__1 <- NULL 
+
+gh2ax1 <- transform(gh2ax, index = as.numeric(interaction(gh2ax$Label, gh2ax$nuc.idx, gh2ax$tag, drop = TRUE))) #this creates an index column that looks at the commonalities between the three columns 'label', 'nuc.idx' and 'tag', and labels the cells based on ascending order. The index should produce a number that is the same as the number of objects in the nuclear data frame. 
+
+nuc1 <- transform(nuc, index = as.numeric(interaction(nuc$Label, nuc$nuc.idx, nuc$tag, drop = TRUE))) #this one is for the nuclear data frame. When completed, this column correlates the information between the nuclear and the gH2AX datasets. 
+nuc1$nbObjects.gH2AX <- as.numeric(nuc1$nbObjects.gH2AX) #change the variables to numbers.
+```
+##Step 4
+#Create a histogram of the integrated DAPI density
+
+Using the DAPI integrated Density from the analyzed images, the cell cycle profile can be ascertained. Here, the name of the correct column will depend on how TANGO was setup. In TANGO, under the edit experiment tab, within the signal quantification for the nucleus, there is the ability to assign a prefix. We assigned "NiN" for the nuclear signal measured within the nucleus. Thus, the correct column name for the DAPI integrated density is "NiNintegratedDensity". This was outlined in the "TANGO setup"" document.
+
+The histogram, below, works by plotting all the NiNintegratedDensity values in a frequency distribution with a BIN size that is dependent on the spread of the data. This way multiple methods of imaging can be used for the analysis.
+
+#Separate G1 from G2
+
+  To separate G1 and G2 cells, a manual inspection of the histogram is required. Choosing NiNintergratedDensity values that are appropriate for each cell cycle stage is needed to demarkate G1 and G2 cells. For more information on this type of cell cycle staging, please see: Roukos et al. Nature Protocols, 2015. 
+  As a quick guide, the histogram generated above should contain two distinct gaussian peaks (depending on cell type), the first peak, usually the most significant peak, represents cells in G1. The second peak should have intensity values that are approximately twice the values seen in the first peak. This second, smaller peak represents G2 cells. For cells in S-phase, they exist between the two peaks. 
+
+  NOTE BEFORE THE CODE CAN CONTINUE, YOU HAVE TO CHOOSE THE VALUES THAT WILL ESTABLISH THE G1 AND G2 BOUNDARIES, USING THE HISTOGRAM GENERATED ABOVE AS THE REFERENCE. Once you have chosen values that will  isolate the G1 and G2 gaussian peaks, they can be entered into the pop up windows that will ask for the specific G1 and G2 upper and lower limits.
+
+  1. Create a new object that is called nucG1, and this will hold the selected values for G1 cells
+
+  2. Create a new object that is called nucG2, and this will hold the selected values for G2 cells
+  
+  3. Plot the histogram with the selected cut off values for G1 and G2. This graphs will automatically save to your working directory as a jpeg. 
+
+
+
+```{r separate cell cycles based on DAPI intensity}
+library(ggplot2); library(scales)
+fromvalue <- as.numeric(scientific(min(nuc1$NiNintegratedDensity), 2)) #find the minimum value of DAPI density and uses that value as the graph's lower limits
+tovalue <- as.numeric(scientific(max(nuc1$NiNintegratedDensity, 0.75), 2)) #find the maximum value of DAPI density and uses that value as the graph's upper limits
+byvalue <- as.numeric(scientific(((max(nuc1$NiNintegratedDensity)-min(nuc1$NiNintegratedDensity))/60), 1)) #finds the difference between the max and min DAPI integrated density values, then divides by 60 to get a value for the x-axis ticks marks.
+cellcycle_profile <- ggplot(nuc1, aes(x=NiNintegratedDensity))+
+geom_histogram(aes(y=..density.., fill = ..count..), alpha = 0.5, binwidth = (byvalue/5))+ #uses the byvalue and divides by 5 to get a bin size.
+scale_fill_gradient(name = "Count")+
+  theme_classic()+
+theme(axis.text.x =  element_text(angle = -90, hjust = 0.5),  plot.title =element_text(face = 'bold', hjust=0.4)) +
+  scale_x_continuous(name = "DAPI integrated density",
+           breaks = seq(from = fromvalue, to =tovalue, by = byvalue))+
+  scale_y_continuous(name = "Density")+
+  geom_density(alpha = 0.1, col = "black", fill = "purple")+
+ggtitle("Histogram of DAPI Integrated Density")
+
+cellcycle_profile #to view the graph in R
+Sys.sleep(2) #stops the code long enough for the graph to be populated in the viewer. This step is needed for running the code all at once, so that the next steps can be properly fullfilled.
+detach_package(ggplot2);detach_package(scales)
+#For G1 separation
+library(tidyverse); library(svDialogs)
+a <- as.numeric(dlgInput("Enter G1 Lower limit", Sys.info()["user"])$res) #creates a popup window for the input of the G1 lower limit. 
+b <- as.numeric(dlgInput("Enter G1 Upper limit", Sys.info()["user"])$res) #popup for upper G1 limit.
+nucG1 <- nuc1 %>% filter(NiNintegratedDensity >= a, NiNintegratedDensity <= b) #separates the values for the G1 cells into a new data frame, based on the limits provided. 
+
+#For G2, we can use the following 
+
+c <- as.numeric(dlgInput("Enter G2 Lower limit", Sys.info()["user"])$res) #creates a popup window for the input of the G2 lower limit. 
+d <- as.numeric(dlgInput("Enter G2 Upper limit", Sys.info()["user"])$res) #popup for upper G2 limit.
+nucG2 <- nuc1 %>% filter(NiNintegratedDensity >= c, NiNintegratedDensity <= d) #separates the values for the G2 cells into a new data frame, based on the limits provided. 
+
+nucS <- nuc1 %>% filter(NiNintegratedDensity > b, NiNintegratedDensity < c)
+
+titles <- c("G1 Lower Limit:", "G1 Upper Limit:", "G2 Lower Limit:", "G2 Upper Limit:") #creating a list for the limits, so that they can be displayed on the graph.
+values <- c(a,b,c,d) #lists the values entered for easy reference.
+graphtitles <- data.frame(titles, values) #creates a data frame so that the titles of the limits on the graphs can be updated with each new experiment.
+gtitle <- unite(graphtitles, "title", c(titles, values), sep = " ") #combines the titles and their repective values into one full length title.
+
+cellcycle_profile2 <- cellcycle_profile + geom_vline(xintercept = a, linetype = "dashed", colour = "red")+ geom_text(aes(x=a, label=gtitle[1,], y=Inf), colour="red", angle=270, hjust = 0, vjust = 1.25, size=4)+
+  geom_vline(xintercept = b, linetype = "dashed", colour = "red")+ geom_text(aes(x=b, label=gtitle[2,], y=Inf), colour="red", angle=270, hjust = 0, vjust = 1.25, size=4)+
+  geom_vline(xintercept = c, linetype = "dashed", colour = "blue")+ geom_text(aes(x=c, label=gtitle[3,], y=Inf), colour="blue", angle=270, hjust = 0, vjust = -0.5, size=4)+
+  geom_vline(xintercept = d, linetype = "dashed", colour = "blue")+
+  geom_text(aes(x=d, label=gtitle[4,], y=Inf), colour="blue", angle=270, hjust = 0, vjust = -0.5, size=4) #adds lines to the graph to visulaize the G1 and G2 boundaries along with their titles.
+
+cellcycle_profile2 #displays the graph
+
+ggsave("cell_cycle_profile.jpeg", plot = cellcycle_profile2, width = 9, height = 5.25, units = "in") #save the graph to the working directory.
+rm(list = c("a","b","c","d")) #removes the variables. 
+
+G1index <- as.data.frame(nucG1[, "index"]) #creates a new dataframe that consists of the indexes found by the G1/G2 separation. This will be used to filter the gh2ax dataset. 
+colnames(G1index)[1] <- "G1index" #renaming the column on G1index for consistent referral
+
+gh2axG1 <- gh2ax1 %>% filter(index %in% c(G1index$G1index)) #filtering out the G1 cells of gh2ax, using the index determined from the nucG1 dataset, and returning all the rows by using the '%in%'.
+
+G2index <- as.data.frame(nucG2[, "index"]) #creates a new dataframe that consists of the indexes found by the G1/G2 separation. This will be used to filter the gh2ax dataset. 
+colnames(G2index)[1] <- "G2index" #renaming the column on G1index for consistent referral
+
+gh2axG2 <- gh2ax1 %>% filter(index %in% c(G2index$G2index)) #filtering out the G1 cells of gh2ax, using the index determined from the nucG1 dataset, and returning all the rows by using the '%in%'.
+
+Sindex <- as.data.frame(nucS[, "index"])  #for all cells in 'S-phase'
+colnames(Sindex)[1] <- "Sindex"
+
+gh2axS <- gh2ax1 %>% filter(index %in% c(Sindex$Sindex)) 
+detach_package(tidyverse); detach_package(ggplot2); detach_package(scales)
+```
+##Step 5a
+#Determining background threshold cuttoff for gH2AX objects.
+
+A caveat with the image analysis carried out on TANGo is that cells with no visible foci are over counted due to background gH2AX staining. This results in small, low intensity but high number gh2ax objects in control cells. To remedy this, a threshold has to be obtained to identify those objects that are actually background staining. By looking at the no irradiation (NIR) treament group, a majority of the cells should have almost no gH2AX foci. This control group will serve to determine the background threshold cutoff values for the FiFaverage (measure of gh2ax foci intensity normalized to its volume) and the FiF integrated density, needed to set background staining to a non-foci object rather than a countable object. 
+
+  1. Split the gh2ax1 dataset into a list of datasets, based on the tag value.
+  2. Create a histogram of the gH2AX volume normalized integrated density and the absolute gH2AX integrated density.
+  3. Model the observed frequency distribution of gH2AX volume normalized integrated density (FiFaverage) using three gaussian peaks. Working from the assumption that a majority of the untreated/unirradiated cells will have observed gH2AX objects that are actually background staining with a low intensity, the gaussian peak with the smallest mean plus two standard deviations will be used to determine a cutoff value.
+  4. Using the histogram of the gH2AX object absolute integrated density (FiFintegratedDensity), a second cutoff value is created for the observed objects that are significantly dim (or in low intensity). Again, this is premised on the hypothesis that the background staining is signifcantly less bright than an observbable gH2AX object. Thus, by applying a second cutoff criteria for gH2AX objects, a more robust background cuttoff can be applied to the dataset. 
+
+```{r foci cutoff based on control cell (tag = 0) and initial time point of treatment (tag = 1)}
+
+splittags <- split(gh2axG1, gh2axG1$tag) #this creates a list of datasets that are split by the tag value.
+tag0 <- splittags[["0"]]
+tag1 <- splittags[["1"]]
+tag2 <- splittags[["2"]]
+tag3 <- splittags[["3"]]
+tag4 <- splittags[["4"]]
+tag5 <- splittags[["5"]]
+tag6 <- splittags[["6"]]
+tag7 <- splittags[["7"]]
+tag8 <- splittags[["8"]]
+tag9 <- splittags[["9"]]
+tag10 <- splittags[["10"]]
+
+#creates an individual dataset by the tag 0. This is so a histogram can be made to visualize the distibution frequency in the untreated cells. 
+## Plot the Volume normalized gH2AX object integrated density (FiFaverage) for the non-treated cells.
+#This step is essential in determining the background thresholding for cells with no observable gH2AX foci.
+#for tag == 0 
+library(ggplot2); library(scales)
+fromvalue1 <- as.numeric(scientific(min(tag0$FiFaverage), 2)) #find the minimum value of gH2AX object volume normalized integrated density and use that value as the graph's lower limits.
+tovalue1 <- as.numeric(scientific(max(tag0$FiFaverage), 2)) #find the minimum value of gH2AX object volume normalized integrated density and use that value as the graph's upper limits.
+byvalue1 <- as.numeric(scientific(((max(tag0$FiFaverage)-min(tag0$FiFaverage))/60), 1)) #finds the difference between the max and min gH2AX object volume normalized integrated density values, then divides by 60 to get a value for the x-axis ticks marks.
+NIR_FiFaverage_profile_tag0 <- ggplot(tag0, aes(x=FiFaverage))+
+geom_histogram(aes(y=..density.., fill = ..count..), alpha = 0.5, binwidth = (byvalue1/5))+ #uses the byvalue and divides by 5 to get a bin size.
+scale_fill_gradient(name = "Count")+
+  theme_classic()+
+theme(axis.text.x =  element_text(angle = -90, hjust = 0.5),  plot.title =element_text(face = 'bold', hjust=0.4)) +
+  scale_x_continuous(name = "gH2AX object volume normalized \n integrated density",
+           breaks = seq(from = fromvalue1, to =tovalue1, by = byvalue1))+
+  scale_y_continuous(name = "Density")+
+  geom_density(alpha = 0.1, col = "black", fill = "purple")+
+ggtitle("Histogram of volume normalized gH2AX intensity per object\n(Only cells with TANGO tag = 0)")
+
+NIR_FiFaverage_profile_tag0 #to view the graph in R
+
+fromvalue2 <- as.numeric(scientific(min(tag0$FiFintegratedDensity), 2)) #find the minimum value of gH2AX object integrated density and use that value as the graph's lower limits.
+tovalue2 <- as.numeric(scientific(max(tag0$FiFintegratedDensity), 2)) #find the minimum value of gH2AX object integrated density and use that value as the graph's upper limits.
+byvalue2 <- as.numeric(scientific(((max(tag0$FiFintegratedDensity)-min(tag0$FiFintegratedDensity))/60), 1)) #finds the difference between the max and min gH2AX object integrated density values, then divides by 60 to get a value for the x-axis ticks marks.
+NIR_FiFintegrateddensity_profile_tag0 <- ggplot(tag0, aes(x=FiFintegratedDensity))+
+geom_histogram(aes(y=..density.., fill = ..count..), alpha = 0.5, binwidth = (byvalue2/5))+ #uses the byvalue and divides by 5 to get a bin size.
+ scale_fill_gradient(name = "Count")+
+  theme_classic()+
+theme(axis.text.x =  element_text(angle = -90, hjust = 0.5),  plot.title =element_text(face = 'bold', hjust=0.4)) +
+  scale_x_continuous(name = "gH2AX object integrated density",
+           breaks = seq(from = fromvalue2, to =tovalue2, by = byvalue2), limits = c(fromvalue2, tovalue2))+
+  scale_y_continuous(name = "Density")+
+  geom_density(alpha = 0.1, col = "black", fill = "purple")+
+ggtitle("Histogram of absolute gH2AX intensity per object\n(Only cells with TANGO tag = 0)")
+
+NIR_FiFintegrateddensity_profile_tag0 #to view the graph in R
+
+#Test for normal distribution of the gH2AX integrated density normalized to object volume in the NIR treatment
+qqnorm(tag0$FiFaverage) #produces a normality graph.
+qqline(tag0$FiFaverage) #produces a line of best fit
+
+#Test for lognormaldistribution of the gH2AX integrated density normalized to object volume (FiFaverage) in the NIR treatment
+qqnorm(log10(tag0$FiFaverage)) 
+qqline(log10(tag0$FiFaverage))
+#Using the package 'Mixtools' we can fit the gH2AX object histogram with three gaussian peaks. 
+library(mixtools)
+            tag0FiFaverage = tag0$FiFaverage
+            mixmdl = normalmixEM(tag0FiFaverage, k = 3) #this uses the algorithm normalmixEM, where 'k' represents the number of peaks used to fit the distribution
+            plot(mixmdl,which=2) #plots an approximation of the frequency distribution.
+            lines(density(tag0FiFaverage), lty=2, lwd=2) #plots the density of the frequency distribution. 
+tag0fitdata <- as.data.frame(mixmdl$mu) #creates a new dataframe to hold the fit data.
+colnames(tag0fitdata)<- "mean" #renames the columns
+tag0fitdata$mean <- as.numeric(tag0fitdata$mean) #converts the data to numbers
+tag0fitdata$sd <- as.numeric(mixmdl$sigma) #adds the standard deviation of the gaussian peaks to the dataframe. 
+
+#Need to find a way to determine the sd of the gaussian peak with the lowest mean (as this will be the left most peak) while not assuming that its sd will be the smallest. To do this, the row to which the smallest mean belongs can be evaluated and then used to call the sd wihtin that row. Using the 'which' function: which(fitdata$mean == min(fitdata$mean)) , the row can be called from the lowest mean. Once it is called, we can use the row to find the associated sd. 
+bckgrnd_threstag0 <- ceiling(min(tag0fitdata$mean)+(2*tag0fitdata$sd[which(tag0fitdata$mean == min(tag0fitdata$mean))]))
+
+#for tag == 1 
+fromvalue1 <- as.numeric(scientific(min(tag1$FiFaverage), 2)) #find the minimum value of gH2AX object volume normalized integrated density and use that value as the graph's lower limits.
+tovalue1 <- as.numeric(scientific(max(tag1$FiFaverage), 2)) #find the minimum value of gH2AX object volume normalized integrated density and use that value as the graph's upper limits.
+byvalue1 <- as.numeric(scientific(((max(tag1$FiFaverage)-min(tag1$FiFaverage))/60), 1)) #finds the difference between the max and min gH2AX object volume normalized integrated density values, then divides by 60 to get a value for the x-axis ticks marks.
+NIR_FiFaverage_profile_tag1 <- ggplot(tag1, aes(x=FiFaverage))+
+geom_histogram(aes(y=..density.., fill = ..count..), alpha = 0.5, binwidth = (byvalue1/5))+ #uses the byvalue and divides by 5 to get a bin size.
+scale_fill_gradient(name = "Count")+
+  theme_classic()+
+theme(axis.text.x =  element_text(angle = -90, hjust = 0.5),  plot.title =element_text(face = 'bold', hjust=0.4)) +
+  scale_x_continuous(name = "gH2AX object volume normalized \n integrated density",
+           breaks = seq(from = fromvalue1, to =tovalue1, by = byvalue1))+
+  scale_y_continuous(name = "Density")+
+  geom_density(alpha = 0.1, col = "black", fill = "purple")+
+ggtitle("Histogram of volume normalized gH2AX intensity per object\n(Only cells with TANGO tag = 1)")
+
+#Test for normal distribution of the gH2AX integrated density normalized to object volume in the NIR treatment
+qqnorm(tag1$FiFaverage) #produces a normality graph.
+qqline(tag1$FiFaverage) #produces a line of best fit
+
+#Test for lognormaldistribution of the gH2AX integrated density normalized to object volume (FiFaverage) in the NIR treatment
+qqnorm(log10(tag1$FiFaverage)) 
+qqline(log10(tag1$FiFaverage))
+#Using the package 'Mixtools' we can fit the gH2AX object histogram with three gaussian peaks. 
+library(mixtools)
+            tag1FiFaverage = tag1$FiFaverage
+            mixmdl = normalmixEM(tag1FiFaverage, k = 2, maxit = 3000) #this uses the algorithm normalmixEM, where 'k' represents the number of peaks used to fit the distribution
+            plot(mixmdl,which=2) #plots an approximation of the frequency distribution.
+            lines(density(tag1FiFaverage), lty=2, lwd=2) #plots the density of the frequency distribution. 
+tag1fitdata <- as.data.frame(mixmdl$mu) #creates a new dataframe to hold the fit data.
+colnames(tag1fitdata)<- "mean" #renames the columns
+tag1fitdata$mean <- as.numeric(tag1fitdata$mean) #converts the data to numbers
+tag1fitdata$sd <- as.numeric(mixmdl$sigma) #adds the standard deviation of the gaussian peaks to the dataframe. 
+
+#Need to find a way to determine the sd of the gaussian peak with the lowest mean (as this will be the left most peak) while not assuming that its sd will be the smallest. To do this, the row to which the smallest mean belongs can be evaluated and then used to call the sd wihtin that row. Using the 'which' function: which(fitdata$mean == min(fitdata$mean)) , the row can be called from the lowest mean. Once it is called, we can use the row to find the associated sd. 
+bckgrnd_threstag1 <- if (floor(min(tag1fitdata$mean)-(2*tag1fitdata$sd[which(tag1fitdata$mean == min(tag1fitdata$mean))])) > ceiling(min(tag0fitdata$mean)+(2*tag0fitdata$sd[which(tag0fitdata$mean == min(tag0fitdata$mean))]))) {
+  floor(min(tag1fitdata$mean)-(2*tag1fitdata$sd[which(tag1fitdata$mean == min(tag1fitdata$mean))]))
+} else {
+  floor(max(tag1fitdata$mean)-(2*tag1fitdata$sd[which(tag1fitdata$mean == max(tag1fitdata$mean))]))
+}
+bckgrnd_thres <- mean(c(bckgrnd_threstag0,bckgrnd_threstag1))
+
+gh2ax1$focitest <-0 #creates a new column for a logical test needed to demarcate a foci or not. 
+gh2axG1$focitest <-0 
+gh2axG2$focitest <-0
+gh2axS$focitest <-0 
+listgh2ax <- list(gh2ax1 = gh2ax1, gh2axG1 = gh2axG1, gh2axG2 = gh2axG2, gh2axS = gh2axS) #creates a list of the dataframes needed to loop through. By using "=" we are allowing the list to contain the names of the dataframes which is needed for the next step. 
+for (j in 1:length(listgh2ax[])) {
+for (i in 1:length(listgh2ax[[j]]$FiFaverage)) {
+if ((listgh2ax[[j]]$FiFaverage[i] >= bckgrnd_threstag1) | (listgh2ax[[j]]$FiFintegratedDensity[i] >= (byvalue2/5) & listgh2ax[[j]]$ZThickness[i] > 0 & listgh2ax[[j]]$FiFaverage[i] >= bckgrnd_thres)) {
+listgh2ax[[j]][i, 'focitest'] <- 111 
+} else{
+  listgh2ax[[j]][i, 'focitest'] <- 000 
+}
+}
+}
+ #loops through the dataframes goes through each value in the FiFaverage and FiFintegratedDensity columns to determine if they are above BOTH the FiFaverage cutoff value determined above and the FiFintegratedDensity cutoff described as any value that is greater than the first 5 bins of a frequency distribution as defined in the NIR_FiFintegrateddensity_profile. 
+rm(i)
+rm(j)
+
+gh2ax1 <- listgh2ax[[1]]
+gh2axG1<- listgh2ax[[2]]
+gh2axG2<- listgh2ax[[3]]
+gh2axS<- listgh2ax[[4]]
+
+rm(listgh2ax)
+library(tidyverse)
+NIR_FiFaverage_profile1 <- NIR_FiFaverage_profile_tag0 + geom_vline(xintercept = bckgrnd_thres, linetype = "solid", colour = "red")+ geom_text(aes(x=bckgrnd_thres, label = "gH2AX Volume Normalized Intesity Cuttoff", y=Inf), colour="black", angle=270, hjust = 0, vjust = 1.25, text=element_text(size=8, family = "TT Arial", face = "bold"))
+NIR_FiFaverage_profile1 #add the cutoff value into the histogram.
+ggsave("Histogram_object_vol_norm_gH2AX_intensity.jpeg", plot = NIR_FiFaverage_profile1, width = 9, height = 5.25, units = "in") #save the graph to the working directory.
+
+NIR_FiFintegrateddensity_profile1 <- NIR_FiFintegrateddensity_profile_tag0 + geom_vline(xintercept = byvalue2, linetype = "solid", colour = "red")+ geom_text(aes(x=(byvalue2+fromvalue2), label = "gH2AX Intensity Cutoff", y=Inf), colour="black", angle=270, hjust = 0, vjust = 1.25, text=element_text(size=8, family = "TT Arial", face = "bold"))
+NIR_FiFintegrateddensity_profile1 #add the cutoff value into the histogram.
+
+ggsave("Histogram_object_absolute_gH2AX_intensity.jpeg", plot = NIR_FiFintegrateddensity_profile1, width = 9, height = 5.25, units = "in") #save the graph to the working directory.
+detach_package(tidyverse); detach_package(mixtools); 
+
+```
+
+##Step 5c
+#Using the Cell cycle G1 values to isolate the foci from the gH2AX dataset
+
+This step will use the indexes from nucG1, nucS and nucG2, determined above, to isolate the values of the foci from the gH2AX data set for each cell cycle stage. 
+  1. Seperate the G1, S and G2 cells from the gH2AX data sets. 
+
+```{r graph the foci intensities and object number}
+library(tidyverse)
+#entire population
+FiFaverage <- ggplot(gh2ax1, aes(x=tag, y=FiFaverage, group=tag))+
+geom_jitter(data = gh2ax1, alpha = 0.25, colour = "red")+
+  scale_y_continuous(name = "gH2AX Integrated Density / Object Vol.")+
+  scale_x_continuous(name = x_axis, breaks = c(0:(max(nuc1$tag))), labels = Times)+
+theme_classic() +
+  geom_boxplot(outlier.shape = NA, alpha = 0, fatten = 2.5)+
+  ggtitle("gH2AX volume normalized intensity, per gH2AX object\n(All cells)")
+
+FiFaverage #show the FIFaverage for the entire population.
+
+FiFaverageG1 <- ggplot(gh2axG1, aes(x=tag, y=FiFaverage, group=tag))+
+geom_jitter(data = gh2axG1, alpha = 0.25, colour = "red")+
+  scale_y_continuous(name = "gH2AX Integrated Density / Object Vol.")+
+  scale_x_continuous(name = x_axis, breaks = c(0:(max(nucG1$tag))), labels = Times)+
+theme_classic() +
+  geom_boxplot(outlier.shape = NA, alpha = 0, fatten = 2.5)+
+  ggtitle("gH2AX volume normalized intensity, per gH2AX object\n(G1 cells)")
+
+FiFaverageG1 #show the FIFaverage for the G1 cells.
+
+FiFaverageG2 <- ggplot(gh2axG2, aes(x=tag, y=FiFaverage, group=tag))+
+geom_jitter(data = gh2axG2, alpha = 0.25, colour = "red")+
+  scale_y_continuous(name = "gH2AX Integrated Density / Object Vol.")+
+  scale_x_continuous(name = x_axis, breaks = c(0:(max(nucG2$tag))), labels = Times)+
+theme_classic() +
+  geom_boxplot(outlier.shape = NA, alpha = 0, fatten = 2.5)+
+  ggtitle("gH2AX volume normalized intensity, per gH2AX object\n(G2 cells)")
+
+FiFaverageG2 #Shows the FIFaverage for the G2 cells.
+
+FiFaverageS <- ggplot(gh2axS, aes(x=tag, y=FiFaverage, group=tag))+
+geom_jitter(data = gh2axS, alpha = 0.25, colour = "red")+
+  scale_y_continuous(name = "gH2AX Integrated Density / Object Vol.")+
+  scale_x_continuous(name = x_axis, breaks = c(0:(max(nucS$tag))), labels = Times)+
+theme_classic() +
+  geom_boxplot(outlier.shape = NA, alpha = 0, fatten = 2.5)+
+  ggtitle("gH2AX volume normalized intensity, per gH2AX object\n(S-phase cells)")
+
+FiFaverageS #Shows the FIFaverage for the S cells.
+
+#Visualize the cutoff. Anything at or below the cuttoff will be replace by a 'NA', deeming these values as zero. This will enable cells to be counted as zero when they have no gH2AX objects. 
+FiFaverage1 <- FiFaverage +geom_hline(yintercept = bckgrnd_thres, lwd = 1)+
+  geom_text(aes(y=bckgrnd_thres, x=0.5, label="Background Threshold"), hjust = 0, vjust = 1.25, text=element_text(size=10, family = "TT Arial", face = "bold"))
+
+FiFaverage1
+ggsave("gH2AX_vol_norm_intensity_per_gH2AX_object_for_all_cells.jpeg", plot = FiFaverage1, width = 9, height = 5.25, units = "in")
+
+FiFaverageG11 <- FiFaverageG1 +geom_hline(yintercept = bckgrnd_thres, lwd = 1)+
+  geom_text(aes(y=bckgrnd_thres, x=0.5, label="Background Threshold"), hjust = 0, vjust = 1.25, text=element_text(size=10, family = "TT Arial", face = "bold"))
+
+FiFaverageG11
+ggsave("gH2AX_vol_norm_intensity_per_gH2AX_object_for_G1_cells.jpeg", plot = FiFaverageG11, width = 9, height = 5.25, units = "in")
+
+FiFaverageG21 <- FiFaverageG2 +geom_hline(yintercept = bckgrnd_thres, lwd = 1)+
+  geom_text(aes(y=bckgrnd_thres, x=0.5, label="Background Threshold"), hjust = 0, vjust = 1.25, text=element_text(size=10, family = "TT Arial", face = "bold"))
+
+FiFaverageG21
+ggsave("gH2AX_vol_norm_intensity_per_gH2AX_object_for_G2_cells.jpeg", plot = FiFaverageG21, width = 9, height = 5.25, units = "in")
+
+FiFaverageS1 <- FiFaverageS +geom_hline(yintercept = bckgrnd_thres, lwd = 1)+
+  geom_text(aes(y=bckgrnd_thres, x=0.5, label="Background Threshold"), hjust = 0, vjust = 1.25, text=element_text(size=10, family = "TT Arial", face = "bold"))
+
+FiFaverageS1
+ggsave("gH2AX_vol_norm_intensity_per_gH2AX_object_for_s-phase_cells.jpeg", plot = FiFaverageS1, width = 9, height = 5.25, units = "in")
+
+#For the gh2ax objects that were deemed to not be foci from the above test, replace the values of the volume normalized gH2AX object intensity (FiFaverage), the absolute intensity (FiFintegratedDensity) and the gH2AX object volume (volume_pix) with NA.
+NAgh2ax1 <-gh2ax1
+NAgh2axG1 <-gh2axG1
+NAgh2axG2 <-gh2axG2
+NAgh2axS <-gh2axS
+listNAgh2ax <- list(NAgh2ax1 = NAgh2ax1, NAgh2axG1 = NAgh2axG1, NAgh2axG2 = NAgh2axG2, NAgh2axS = NAgh2axS) #creates a list of dataframes to cycle through
+for (i in 1:length(listNAgh2ax[])) {
+listNAgh2ax[[i]]$volume_pix[listNAgh2ax[[i]]$focitest == 0] <- NaN
+listNAgh2ax[[i]]$FiFaverage[listNAgh2ax[[i]]$focitest == 0] <- NaN
+listNAgh2ax[[i]]$FiFintegratedDensity[listNAgh2ax[[i]]$focitest == 0] <- NaN
+} #loops though the four dataframes and replaces the values with NA.
+NAgh2ax1 <- listNAgh2ax[[1]] #replaces the dataframe with the updated dataframe.
+NAgh2axG1 <- listNAgh2ax[[2]]
+NAgh2axG2 <- listNAgh2ax[[3]]
+NAgh2axS <- listNAgh2ax[[4]]
+rm(listNAgh2ax)
+#create a new variable of gh2ax objects that have a FiFaverage value greater than one standard deviation from the geometric means. 
+gh2axObjs <- NAgh2ax1 %>% #create a new dataframe that is based on the thresholded NAgh2ax1
+group_by(index, tag) %>% #this new dataset will be group the data in NAgh2ax1 by index and tag
+summarize(gh2axobjs = length(FiFaverage[!is.na(FiFaverage)])) #the new data set list the total number of gh2ax objects counted in a cell (using the length function), returing the number of object per cell after the thresholding has occured. The new dataset (gh2axObjs) should match the number of observations seen in the respective nucleus data set. 
+nuc1 <- nuc1[order(nuc1$index),] #this ordered the nuc1 dataset by the index so it can match the new dataset created above.
+nuc1$gh2axObjs <- gh2axObjs$gh2axobjs #appends the objects column to the nuc1 dataset in a new column called gh2axObjs. 
+#repeat this for the G1 cells.
+gh2axObjsG1 <- NAgh2axG1 %>%
+group_by(index, tag) %>%
+summarize(gh2axobjsG1 = length(FiFaverage[!is.na(FiFaverage)]))
+nucG1 <- nucG1[order(nucG1$index),]
+nucG1$gh2axObjsG1 <- gh2axObjsG1$gh2axobjsG1
+#repeat this for the G2 cells. 
+gh2axObjsG2 <- NAgh2axG2 %>%
+group_by(index, tag) %>%
+summarize(gh2axobjsG2 = length(FiFaverage[!is.na(FiFaverage)]))
+nucG2 <- nucG2[order(nucG2$index),]
+nucG2$gh2axObjsG2 <- gh2axObjsG2$gh2axobjsG2
+#repeat this for the S cells. 
+gh2axObjsS <- NAgh2axS %>%
+group_by(index, tag) %>%
+summarize(gh2axobjsS = length(FiFaverage[!is.na(FiFaverage)]))
+nucS <- nucS[order(nucS$index),]
+nucS$gh2axObjsS <- gh2axObjsS$gh2axobjsS
+
+#Plot the number of objects, i.e. Foci counting, for the entire population and the G1 and G2 separated cells. To change the y-axis limits of the graphs, on the line of code called "scale_y_continuous", after the name add a ", limits = c(a, b)" where a is the lower limit and b is the upper limit. For example, the first graph (nbObjectsgh2ax) would look like: "scale_y_continuous(name = "IRIF (gammaH2AX)", limits = c(a,b))+".
+nbObjectsgh2ax <- ggplot(nuc1, aes(x=tag, y=nbObjects.gH2AX, group=tag))+
+  geom_boxplot(outlier.shape = NA)+
+geom_jitter(data = nuc1, alpha = 0.25, colour = "red")+
+  scale_y_continuous(name = "IRIF (gammaH2AX)")+
+  scale_x_continuous(name = x_axis, breaks = c(0:(max(nuc1$tag))), labels = Times)+
+theme_classic() +
+  ggtitle("Number of Objects Counted by TANGO without background subtraction")
+nbObjectsgh2ax
+ggsave("no_gh2ax_objects.jpeg", plot = nbObjectsgh2ax, width = 9, height = 5.25, units = "in")
+
+gh2axObjsg <- ggplot(nuc1, aes(x=tag, y=gh2axObjs, group=tag))+
+  geom_boxplot(outlier.shape = NA)+
+geom_jitter(data = nuc1, alpha = 0.25, colour = "red")+
+  scale_y_continuous(name = "IRIF (gammaH2AX)")+
+  scale_x_continuous(name = x_axis, breaks = c(0:(max(nuc1$tag))), labels = Times)+
+theme_classic() +
+  ggtitle("Number of Objects Counted by TANGO with background subtraction")
+gh2axObjsg
+ggsave("no_gh2ax_objects_bkgnd_sub.jpeg", plot = gh2axObjsg, width = 9, height = 5.25, units = "in")
+
+
+nbObjectsgh2axG1 <- ggplot(nucG1, aes(x=tag, y=nbObjects.gH2AX, group=tag))+
+  geom_boxplot(outlier.shape = NA)+
+geom_jitter(data = nucG1, alpha = 0.25, colour = "red")+
+  scale_y_continuous(name = "IRIF (gammaH2AX)")+
+  scale_x_continuous(name = x_axis, breaks = c(0:(max(nucG1$tag))), labels = Times)+
+theme_classic() +
+  ggtitle("Number of objects counted by TANGO in G1 cells without background subtraction")
+nbObjectsgh2axG1
+ggsave("no_gh2ax_objects_G1_cells.jpeg", plot = nbObjectsgh2axG1, width = 9, height = 5.25, units = "in")
+
+gh2axObjsgG1 <- ggplot(nucG1, aes(x=tag, y=gh2axObjsG1, group=tag))+
+  geom_boxplot(outlier.shape = NA)+
+geom_jitter(data = nucG1, alpha = 0.25, colour = "red")+
+  scale_y_continuous(name = "IRIF (gammaH2AX)")+
+  scale_x_continuous(name = x_axis, breaks = c(0:(max(nucG1$tag))), labels = Times)+
+theme_classic() +
+  ggtitle("Number of objects counted by TANGO in G1 cells with background subtraction")
+gh2axObjsgG1
+ggsave("no_gh2ax_objects_bkgnd_sub_G1_cells.jpeg", plot = gh2axObjsgG1, width = 9, height = 5.25, units = "in")
+
+nbObjectsgh2axG2 <- ggplot(nucG2, aes(x=tag, y=nbObjects.gH2AX, group=tag))+
+  geom_boxplot(outlier.shape = NA)+
+geom_jitter(data = nucG2, alpha = 0.25, colour = "red")+
+  scale_y_continuous(name = "IRIF (gammaH2AX)")+
+  scale_x_continuous(name = x_axis, breaks = c(0:(max(nucG2$tag))), labels = Times)+
+theme_classic() +
+  ggtitle("Number of objects counted by TANGO in G2 cells without background subtraction")
+nbObjectsgh2axG2
+ggsave("no_gh2ax_objects_G2_cells.jpeg", plot = nbObjectsgh2axG2, width = 9, height = 5.25, units = "in")
+
+gh2axObjsgG2 <- ggplot(nucG2, aes(x=tag, y=gh2axObjsG2, group=tag))+
+  geom_boxplot(outlier.shape = NA)+
+geom_jitter(data = nucG2, alpha = 0.25, colour = "red")+
+  scale_y_continuous(name = "IRIF (gammaH2AX)")+
+  scale_x_continuous(name = x_axis, breaks = c(0:(max(nucG2$tag))), labels = Times)+
+theme_classic() +
+  ggtitle("Number of objects counted by TANGO in G2 cells with background subtraction")
+gh2axObjsgG2
+ggsave("no_gh2ax_objects_bkgnd_sub_G2_cells.jpeg", plot = gh2axObjsgG2, width = 9, height = 5.25, units = "in")
+
+nbObjectsgh2axS <- ggplot(nucS, aes(x=tag, y=nbObjects.gH2AX, group=tag))+
+  geom_boxplot(outlier.shape = NA)+
+geom_jitter(data = nucS, alpha = 0.25, colour = "red")+
+  scale_y_continuous(name = "IRIF (gammaH2AX)")+
+  scale_x_continuous(name = x_axis, breaks = c(0:(max(nucS$tag))), labels = Times)+
+theme_classic() +
+  ggtitle("Number of objects counted by TANGO in S cells without background subtraction")
+nbObjectsgh2axS
+ggsave("no_gh2ax_objects_S-phase_cells.jpeg", plot = nbObjectsgh2axS, width = 9, height = 5.25, units = "in")
+
+gh2axObjsgS <- ggplot(nucS, aes(x=tag, y=gh2axObjsS, group=tag))+
+  geom_boxplot(outlier.shape = NA)+
+geom_jitter(data = nucS, alpha = 0.25, colour = "red")+
+  scale_y_continuous(name = "IRIF (gammaH2AX)")+
+  scale_x_continuous(name = x_axis, breaks = c(0:(max(nucS$tag))), labels = Times)+
+theme_classic() +
+  ggtitle("Number of objects counted by TANGO in S cells with background subtraction")
+gh2axObjsgS
+ggsave("no_gh2ax_objects_bkgnd_sub_S-phase_cells.jpeg", plot = gh2axObjsgS, width = 9, height = 5.25, units = "in")
+
+library(reshape2)
+#Export the FiFaverage per foci and the number of objects counted for all cells
+FiFaverage_1 <- select(gh2ax1, idx, tag, index, FiFaverage, volume_pix) %>% arrange(tag) #selects the columns of interest into a new dataframe.
+FiFaverage1 <- acast(FiFaverage_1, index+idx~tag, value.var='FiFaverage', na.rm = FALSE) #transposes the data around the FiFaverage, separating it into multiple columns where each column is all values under one tag value.
+colnames(FiFaverage1) <-  c(Times) #add the tag names inputed above to the column headings.
+write.csv(FiFaverage1, file = "vol_norm_gH2AX_intensity_all_cells.csv", row.names = TRUE, col.names = TRUE) #saves the file.
+
+gh2axObjs1 <- select(nuc1, tag, index, gh2axObjs) %>% arrange(tag)
+nbObjectsgh2axbkgndsub <- acast(gh2axObjs1, index~tag, value.var='gh2axObjs', na.rm = FALSE)
+colnames(nbObjectsgh2axbkgndsub) <-  c(Times)
+write.csv(nbObjectsgh2axbkgndsub, file = "no_gh2ax_objects_bkgnd_sub_all_cells.csv", row.names = TRUE, col.names = TRUE)
+
+#For G1 Cells
+FiFaverage_G1 <- select(gh2axG1, idx, tag, index, FiFaverage) %>% arrange(tag)
+FiFaverageG11 <- acast(FiFaverage_G1, index+idx~tag, value.var='FiFaverage', na.rm = FALSE)
+colnames(FiFaverageG11) <-  c(Times)
+write.csv(FiFaverageG11, file = "vol_norm_gH2AX_intensity_G1_cells.csv", row.names = TRUE, col.names = TRUE)
+
+gh2axObjsG1 <- select(nucG1, tag, index, gh2axObjsG1) %>% arrange(tag)
+nbObjectsgh2axbkgndsubG1 <- acast(gh2axObjsG1, index~tag, value.var='gh2axObjsG1', na.rm = FALSE)
+colnames(nbObjectsgh2axbkgndsubG1) <-  c(Times)
+write.csv(nbObjectsgh2axbkgndsubG1, file = "no_gh2ax_objects_bkgnd_sub_G1_cells.csv", row.names = TRUE, col.names = TRUE)
+
+#For G2 Cells
+FiFaverage_G2 <- select(gh2axG2, idx, tag, index, FiFaverage) %>% arrange(tag)
+FiFaverageG21 <- acast(FiFaverage_G2, index+idx~tag, value.var='FiFaverage', na.rm = FALSE)
+colnames(FiFaverageG21) <-  c(Times)
+write.csv(FiFaverageG21, file = "vol_norm_gH2AX_intensity_G2_cells.csv", row.names = TRUE, col.names = TRUE)
+
+gh2axObjsG2 <- select(nucG2, tag, index, gh2axObjsG2) %>% arrange(tag)
+nbObjectsgh2axbkgndsubG2 <- acast(gh2axObjsG2, index~tag, value.var='gh2axObjsG2', na.rm = FALSE)
+colnames(nbObjectsgh2axbkgndsubG2) <-  c(Times)
+write.csv(nbObjectsgh2axbkgndsubG2, file = "no_gh2ax_objects_bkgnd_sub_G2_cells.csv", row.names = TRUE, col.names = TRUE)
+
+#For S Cells
+FiFaverage_S <- select(gh2axS, idx, tag, index, FiFaverage) %>% arrange(tag)
+FiFaverageS1 <- acast(FiFaverage_S, index+idx~tag, value.var='FiFaverage', na.rm = FALSE)
+colnames(FiFaverageS1) <-  c(Times)
+write.csv(FiFaverageS1, file = "vol_norm_gH2AX_intensity_S-phase_cells.csv", row.names = TRUE, col.names = TRUE)
+
+gh2axObjsS <- select(nucS, tag, index, gh2axObjsS) %>% arrange(tag)
+nbObjectsgh2axbkgndsubS <- acast(gh2axObjsS, index~tag, value.var='gh2axObjsS', na.rm = FALSE)
+colnames(nbObjectsgh2axbkgndsubS) <-  c(Times)
+write.csv(nbObjectsgh2axbkgndsubS, file = "no_gh2ax_objects_bkgnd_sub_S-phase_cells.csv", row.names = TRUE, col.names = TRUE)
+
+detach_package(reshape2); detach_package(plyr); detach_package(tidyverse); detach_package(ggplot2); 
+```
+##Step 6
+#Create new variables
+
+  1. Create the mean of each foci 'objects' integrated intensity, normalized to its volume, per cell, called Average_Normalized_Intensity. 
+ 
+  2. Create the mean of the volume for the foci 'object' per cell
+
+
+This averages the FiFaverage for each foci 'object' per nucleus to get an average of foci integrated density normalized to the foci 'object' volume. It uses the index column to identify foci within the same nucleus then averages them per cell. It is important to ensure that the column titles are correct, otherwise nothing will happen.
+
+```{r determine average object intensity per cell} 
+library(tidyverse)
+#Make the variable for all cells
+
+Average_Normalized_Intensity <- NAgh2ax1 %>% #Calls the data set to the operation.
+group_by(index) %>% #groups by the index, so that the values can be summarized per cell.
+  filter(!is.na(FiFaverage)) %>% #this removes the NA values and looks at only the values
+summarize(Average_Normalized_Intensity = mean(FiFaverage)) # this is the average of the volume normalized, foci integrated density per cell. The only issue is where there were NA values (due to the background correction in step 5), the index will be missing for those cells. Thus, to be able to merge the new variables with the original datasets, the missing values from the cells that were substracted have to be filled in as NA. The following accomplishes the task.
+nuc1index <- data.frame(index = nuc1$index) #Creates a new data frame with the index of cells from the original dataset.
+Average_Normalized_Intensity <- merge(nuc1index, Average_Normalized_Intensity, all.x = TRUE) #Fills in the missing values with NA. These values can now be appended to the original dataset. Occurs in step 7.
+Average_Normalized_Intensity[is.na(Average_Normalized_Intensity)] <- 0 #Sets NA to 0 since the cells below the background threshold are considered to have no gH2AX objects. By setting these values to 0, they are included in the analysis.  
+
+Average_Object_Volume <- NAgh2ax1 %>%
+group_by(index) %>%
+  filter(!is.na(volume_pix)) %>% 
+summarize(Average_Object_Volume = mean(volume_pix)) #this is the average volume of the foci per cell.
+
+Average_Object_Volume <- merge(nuc1index, Average_Object_Volume, all.x = TRUE) 
+Average_Object_Volume[is.na(Average_Object_Volume)] <- 0
+
+#Make the variable for G1 cells
+Average_Normalized_IntensityG1 <- NAgh2axG1 %>%
+group_by(index) %>%
+  filter(!is.na(FiFaverage)) %>% 
+summarize(Average_Normalized_IntensityG1 = mean(FiFaverage))  #this is the average of the volume normalized, foci integrated density per cell
+
+nucG1index <- data.frame(index = nucG1$index)
+Average_Normalized_IntensityG1 <- merge(nucG1index, Average_Normalized_IntensityG1, all.x = TRUE)  
+Average_Normalized_IntensityG1[is.na(Average_Normalized_IntensityG1)] <- 0
+
+Average_Object_VolumeG1 <- NAgh2axG1 %>%
+group_by(index) %>%
+  filter(!is.na(volume_pix)) %>% 
+summarize(Average_Object_VolumeG1 = mean(volume_pix))#this is the average volume of the foci per cell.
+
+Average_Object_VolumeG1 <- merge(nucG1index, Average_Object_VolumeG1, all.x = TRUE)
+Average_Object_VolumeG1[is.na(Average_Object_VolumeG1)] <- 0
+
+#Make the variable for G2 cells
+Average_Normalized_IntensityG2 <- NAgh2axG2 %>%
+group_by(index) %>%
+  filter(!is.na(FiFaverage)) %>% 
+summarize(Average_Normalized_IntensityG2 = mean(FiFaverage))  # this is the average of the volume normalized, foci integrated density per cell
+
+nucG2index <- data.frame(index = nucG2$index)
+Average_Normalized_IntensityG2 <- merge(nucG2index, Average_Normalized_IntensityG2, all.x = TRUE)  
+Average_Normalized_IntensityG2[is.na(Average_Normalized_IntensityG2)] <- 0
+
+Average_Object_VolumeG2 <- NAgh2axG2 %>%
+group_by(index) %>%
+  filter(!is.na(volume_pix)) %>% 
+summarize(Average_Object_VolumeG2 = mean(volume_pix))#this is the average volume of the foci per cell.
+
+Average_Object_VolumeG2 <- merge(nucG2index, Average_Object_VolumeG2, all.x = TRUE)
+Average_Object_VolumeG2[is.na(Average_Object_VolumeG2)] <- 0
+
+#Make the variable for S cells
+Average_Normalized_IntensityS <- NAgh2axS %>%
+group_by(index) %>%
+  filter(!is.na(FiFaverage)) %>% 
+summarize(Average_Normalized_IntensityS = mean(FiFaverage))  # this is the average of the volume normalized, foci integrated density per cell
+
+nucSindex <- data.frame(index = nucS$index)
+Average_Normalized_IntensityS <- merge(nucSindex, Average_Normalized_IntensityS, all.x = TRUE)  
+Average_Normalized_IntensityS[is.na(Average_Normalized_IntensityS)] <- 0
+
+Average_Object_VolumeS <- NAgh2axS %>%
+group_by(index) %>%
+  filter(!is.na(volume_pix)) %>% 
+summarize(Average_Object_VolumeS = mean(volume_pix))#this is the average volume of the foci per cell.
+
+Average_Object_VolumeS <- merge(nucSindex, Average_Object_VolumeS, all.x = TRUE)
+Average_Object_VolumeS[is.na(Average_Object_VolumeS)] <- 0
+
+```
+##Step 7a
+#Reorganize the data
+
+  1. Attach the data frame we labelled nuc, so that it is at the forefront of the program. This way we can refer to it without having to specify the data frame.
+
+  2. Then we will create new objects that are the 'nuc' and 'FiFsum' sheets ordered by the labels. 
+
+  3. After this, the FiFsum column that was calculated before in data frame FiFsum can now be transferred to the new data frame 'nuc2' 
+
+  4. Create a new column, Relative_Intensity, that is the mean gH2AX signal divided by the nuclear volume. 
+
+  5. Create the gH2ax foci expansion correction value.
+  
+  6. Correct the observed signal for foci expansion.
+  
+  7. Detach dataset from R environment to ensure no other functions will unintentionally alter the dataset.
+
+```{r determine foci expansion and refined object signal - all cells}
+#1.
+attach(nuc1) #brings nuc dataframe to forefront then orders by label, this is needed for FiFsum integration so that the sums will match up with the correct image, nuclei and tag
+
+#2. Order the columns by index number so that the values will corresponding the their matching cell.
+nuc2 <- nuc1[order(nuc1$index),]
+Average_Normalized_Intensity <- Average_Normalized_Intensity[order(Average_Normalized_Intensity$index),]
+Average_Object_Volume <- Average_Object_Volume[order(Average_Object_Volume$index),] #ordering the data frame by index
+
+#3. Append Average_Normalized_Intensity column to nuc2 dataframe
+
+nuc2$Average_Normalized_Intensity <- Average_Normalized_Intensity$Average_Normalized_Intensity
+nuc2$Average_Object_Volume <- Average_Object_Volume$Average_Object_Volume #attaching the mean foci volume to the dataframe Nuc2
+
+#4. Divide Average_Normalized_Intensity by nuclear volume(in pixels)
+
+nuc2$Relative_Intensity <- nuc2$Average_Normalized_Intensity/nuc2$volume_pix 
+
+#5. Create the Foci expansion correction value.
+#change the nbObjects.gH2AX to a numeric value column. This is done inorder to ensure that the values in the table are numbers and can be use in a mathematical function. 
+
+nuc2$Foci_Expansion_Factor <- nuc2$Average_Object_Volume/nuc2$gh2axObjs #creating a new variable with the mean volume of the gH2AX foci divided by the number of foci per cell. This is the foci expansion correction. 
+
+#6. Correcting the mean gH2Ax intensity for foci expansion. This takes the Average_Normalized_Intensity variable for each cell and divides it by the foci expansion value for that cell. 
+nuc2$Refined_gH2AX <- nuc2$Relative_Intensity/nuc2$Foci_Expansion_Factor 
+nuc2$loggedRefined_gH2AX <- log10(nuc2$Refined_gH2AX) #take log of new value
+
+nuc2$logRelative_Intensity <- log10(nuc2$Relative_Intensity) #take log of RSv Mean
+nuc2$logFoci_Expansion_Factor <- log10(nuc2$Foci_Expansion_Factor) #take log of foci expansion value
+nuc2$Refined_gH2AX[is.na(nuc2$Refined_gH2AX)] <- 0
+#7. Detach the nuc2 dataset from the environment. A good habbit. Also remove variables that have been used. 
+detach(nuc1)#unattach nuc from R so that nothing else can happen to this data set unintentionally. 
+rm(Average_Object_Volume) #remove these variables from the global environment
+rm(Average_Normalized_Intensity) 
+
+```
+##Step 7b
+#Repeat for G1 Cells
+
+```{r}
+#1.
+attach(nucG1) #brings nuc dataframe to forefront then orders by label, this is needed for FiFsum integration so that the sums will match up with the correct image, nuclei and tag
+
+#2. Order the columns by index number so that the values will corresponding the their matching cell.
+nucG1 <- nucG1[order(nucG1$index),]
+Average_Normalized_IntensityG1 <- Average_Normalized_IntensityG1[order(Average_Normalized_IntensityG1$index),]
+Average_Object_VolumeG1 <- Average_Object_VolumeG1[order(Average_Object_VolumeG1$index),] #ordering the data frame by index
+
+#3. Append Average_Normalized_Intensity column to nucG1 dataframe
+
+nucG1$Average_Normalized_IntensityG1 <- Average_Normalized_IntensityG1$Average_Normalized_Intensity
+nucG1$Average_Object_VolumeG1 <- Average_Object_VolumeG1$Average_Object_Volume #attaching the mean foci volume to the dataframe nucG1.
+
+#4. Divide Average_Normalized_Intensity by nuclear volume(in pixels)
+
+nucG1$Relative_Intensity <- nucG1$Average_Normalized_IntensityG1/nucG1$volume_pix
+
+#5. Create the Foci expansion correction value.
+#change the nbObjects.gH2AX to a numeric value column. This is done inorder to ensure that the values in the table are numbers and can be use in a mathematical function. 
+
+nucG1$Foci_Expansion_Factor <- nucG1$Average_Object_VolumeG1/nucG1$gh2axObjsG1 #creating a new variable with the mean volume of the gH2AX foci divided by the number of foci per cell. This is the foci expansion correction. 
+
+#6. Correcting the mean gH2Ax intensity for foci expansion. This takes the Average_Normalized_Intensity variable for each cell and divides it by the foci expansion value for that cell. 
+nucG1$Refined_gH2AX <- nucG1$Relative_Intensity/nucG1$Foci_Expansion_Factor 
+nucG1$loggedRefined_gH2AX <- log10(nucG1$Refined_gH2AX) #take log of new value
+
+nucG1$logRelative_Intensity <- log10(nucG1$Relative_Intensity) #take log of RSv Mean
+nucG1$logFoci_Expansion_Factor <- log10(nucG1$Foci_Expansion_Factor) #take log of foci expansion value
+nucG1$Refined_gH2AX[is.na(nucG1$Refined_gH2AX)] <- 0 #Setting the no foci cells to zero.
+
+#7. Detach the nucG1 dataset from the environment. A good habbit. Also remove variables that have been used. 
+detach(nucG1) #unattaches nucG1 from R so that nothing else can happen to this data set unintentionally. 
+rm(Average_Object_VolumeG1) #remove these variables from the global environment
+rm(Average_Normalized_IntensityG1) 
+
+```
+##Step 7c
+#Repeat for G2 Cells
+
+```{r}
+#1.
+attach(nucG2) #brings nuc dataframe to forefront then orders by label, this is needed for FiFsum integration so that the sums will match up with the correct image, nuclei and tag
+
+#2. Order the columns by index number so that the values will corresponding the their matching cell.
+nucG2 <- nucG2[order(nucG2$index),]
+Average_Normalized_IntensityG2 <- Average_Normalized_IntensityG2[order(Average_Normalized_IntensityG2$index),]
+Average_Object_VolumeG2 <- Average_Object_VolumeG2[order(Average_Object_VolumeG2$index),] #ordering the data frame by index
+
+#3. Append Average_Normalized_Intensity column to nucG2 dataframe
+
+nucG2$Average_Normalized_IntensityG2 <- Average_Normalized_IntensityG2$Average_Normalized_Intensity
+nucG2$Average_Object_VolumeG2 <- Average_Object_VolumeG2$Average_Object_Volume #attaching the mean foci volume to the dataframe nucG2
+
+#4. Divide Average_Normalized_Intensity by nuclear volume(in pixels)
+
+nucG2$Relative_Intensity <- nucG2$Average_Normalized_IntensityG2/nucG2$volume_pix
+
+#5. Create the Foci expansion correction value.
+#change the nbObjects.gH2AX to a numeric value column. This is done inorder to ensure that the values in the table are numbers and can be use in a mathematical function. 
+
+nucG2$Foci_Expansion_Factor <- nucG2$Average_Object_VolumeG2/nucG2$gh2axObjsG2 #creating a new variable with the mean volume of the gH2AX foci divided by the number of foci per cell. This is the foci expansion correction. 
+
+#6. Correcting the mean gH2Ax intensity for foci expansion. This takes the Average_Normalized_Intensity variable for each cell and divides it by the foci expansion value for that cell. 
+nucG2$Refined_gH2AX <- nucG2$Relative_Intensity/nucG2$Foci_Expansion_Factor 
+nucG2$loggedRefined_gH2AX <- log10(nucG2$Refined_gH2AX) #take log of new value
+
+nucG2$logRelative_Intensity <- log10(nucG2$Relative_Intensity) #take log of RSv Mean
+nucG2$logFoci_Expansion_Factor <- log10(nucG2$Foci_Expansion_Factor) #take log of foci expansion value
+nucG2$Refined_gH2AX[is.na(nucG2$Refined_gH2AX)] <- 0 #Setting the no foci cells to zero.
+#7. Detach the nucG2 dataset from the environment. A good habbit. Also remove variables that have been used. 
+detach(nucG2) #unattaches nucG2 from R so that nothing else can happen to this data set unintentionally. 
+rm(Average_Object_VolumeG2) #remove these variables from the global environment
+rm(Average_Normalized_IntensityG2) 
+
+```
+##Step 7d
+#Repeat for S Cells
+
+```{r}
+#1.
+attach(nucS) #brings nuc dataframe to forefront then orders by label, this is needed for FiFsum integration so that the sums will match up with the correct image, nuclei and tag
+
+#2. Order the columns by index number so that the values will corresponding the their matching cell.
+nucS <- nucS[order(nucS$index),]
+Average_Normalized_IntensityS <- Average_Normalized_IntensityS[order(Average_Normalized_IntensityS$index),]
+Average_Object_VolumeS <- Average_Object_VolumeS[order(Average_Object_VolumeS$index),] #ordering the data frame by index
+
+#3. Append Average_Normalized_Intensity column to nucS dataframe
+
+nucS$Average_Normalized_IntensityS <- Average_Normalized_IntensityS$Average_Normalized_Intensity
+nucS$Average_Object_VolumeS <- Average_Object_VolumeS$Average_Object_Volume #attaching the mean foci volume to the dataframe nucS
+
+#4. Divide Average_Normalized_Intensity by nuclear volume(in pixels)
+
+nucS$Relative_Intensity <- nucS$Average_Normalized_IntensityS/nucS$volume_pix
+
+#5. Create the Foci expansion correction value.
+#change the nbObjects.gH2AX to a numeric value column. This is done inorder to ensure that the values in the table are numbers and can be use in a mathematical function. 
+
+nucS$Foci_Expansion_Factor <- nucS$Average_Object_VolumeS/nucS$gh2axObjsS #creating a new variable with the mean volume of the gH2AX foci divided by the number of foci per cell. This is the foci expansion correction. 
+
+#6. Correcting the mean gH2Ax intensity for foci expansion. This takes the Average_Normalized_Intensity variable for each cell and divides it by the foci expansion value for that cell. 
+nucS$Refined_gH2AX <- nucS$Relative_Intensity/nucS$Foci_Expansion_Factor 
+nucS$loggedRefined_gH2AX <- log10(nucS$Refined_gH2AX) #take log of new value
+
+nucS$logRelative_Intensity <- log10(nucS$Relative_Intensity) #take log of RSv Mean
+nucS$logFoci_Expansion_Factor <- log10(nucS$Foci_Expansion_Factor) #take log of foci expansion value
+nucS$Refined_gH2AX[is.na(nucS$Refined_gH2AX)] <- 0 #Setting the no foci cells to zero.
+#7. Detach the nucS dataset from the environment. A good habbit. Also remove variables that have been used. 
+detach(nucS) #unattaches nucS from R so that nothing else can happen to this data set unintentionally. 
+rm(Average_Object_VolumeS) #remove these variables from the global environment
+rm(Average_Normalized_IntensityS) 
+
+```
+##Step 8
+#Plot the data
+
+  1. Use ggplot2 to make graphs of the data and visualize it.
+  
+  2. To change the limits on the graph, add ", limits = c(a,b)" to the scale_y_continuous(), where a is the lower limit and b is the upper limit. 
+  
+  3. To change the data and visualize another factor, the command: ggplot(w, aes(x=x, y=y, group=x)) is what determines the data to visualize. The dataset of interest is the first factor (w), then the axis are determined (aes()) with the x-axis = x, y-axis = y and group = x (how to separate the data). See the examples below for clarification.
+  
+```{r graph refined signals, foci expansion}
+
+library(ggplot2)
+#entire population
+#Plot the average foci intensity adjusted for nuclear volume.
+Meanfociint <- ggplot(nuc2, aes(x=tag, y=Relative_Intensity, group=tag))+
+geom_jitter(data = nuc2, alpha = 0.25, colour = "red")+
+  geom_boxplot(fill = "red", alpha = 0.1, outlier.shape = NA)+
+  scale_y_continuous(name = "Signal")+
+  scale_x_continuous(name = x_axis, breaks = c(0:(max(nuc1$tag))), labels = Times)+
+theme_classic() +
+  ggtitle("Average gH2AX object integrated intensity per cell, adjusted for nuclear volume")
+Meanfociint 
+ggsave("Ave_gH2AX_object_intensity_normalized_to_nuc_vol_all_cells.jpeg", plot = Meanfociint, width = 9, height = 5.25, units = "in") #the size of the image can be changed here as it saves. Currently it exports to a size that matches the font size.
+
+#Plot the average foci intensity, corrected for foci expansion and adjusted for nuclear volume.
+volcorrMeanfociint <- ggplot(nuc2, aes(x=tag, y=Refined_gH2AX, group=tag))+
+geom_jitter(data = nuc2, alpha = 0.25, colour = "red")+
+  geom_boxplot(fill = "red", alpha = 0.1, outlier.shape = NA)+
+  scale_y_continuous(name = "Refined gH2AX")+
+  scale_x_continuous(name = x_axis, breaks = c(0:(max(nuc1$tag))), labels = Times)+
+theme_classic() +
+  ggtitle("Foci expansion corrected mean object intensity per cell")
+volcorrMeanfociint
+ggsave("Refined_gH2AX_all_cells.jpeg", plot = volcorrMeanfociint, width = 9, height = 5.25, units = "in")
+
+#Foci expansion value
+Foci_Expansion_Factor <- ggplot(nuc2, aes(x=tag, y=Foci_Expansion_Factor, group=tag))+
+geom_jitter(data = nuc2, alpha = 0.25, colour = "red")+
+  scale_y_continuous(name = "Foci expansion factor")+
+  scale_x_continuous(name = x_axis, breaks = c(0:(max(nuc1$tag))), labels = Times)+
+theme_classic() +
+  ggtitle("Foci expansion factor for all cells")
+Foci_Expansion_Factor
+ggsave("Foci_expansion_factor_all_cells.jpeg", plot = Foci_Expansion_Factor, width = 9, height = 5.25, units = "in")
+
+#For G1 Cells 
+#Plot the average foci intensity adjusted for nuclear volume.
+MeanfociintG1 <- ggplot(nucG1, aes(x=tag, y=Relative_Intensity, group=tag))+
+geom_jitter(data = nucG1, alpha = 0.25, colour = "red")+
+  geom_boxplot(fill = "red", alpha = 0.1, outlier.shape = NA)+
+  scale_y_continuous(name = "Signal")+
+  scale_x_continuous(name = x_axis, breaks = c(0:(max(nuc1$tag))), labels = Times)+
+theme_classic() +
+  ggtitle("Average G1 cell gH2AX foci integrated intensity per cell, adjusted for nuclear volume")
+MeanfociintG1
+ggsave("Ave_gH2AX_object_intensity_normalized_to_nuc_vol_G1_Cells.jpeg", plot = MeanfociintG1, width = 9, height = 5.25, units = "in")
+
+#Plot the average foci intensity, corrected for foci expansion and adjusted for nuclear volume.
+volcorrMeanfociintG1 <- ggplot(nucG1, aes(x=tag, y=Refined_gH2AX, group=tag))+
+geom_jitter(data = nucG1, alpha = 0.25, colour = "red")+
+  geom_boxplot(fill = "red", alpha = 0.1, outlier.shape = NA)+
+  scale_y_continuous(name = "Refined gH2AX", limits = c(0,0.01))+
+  scale_x_continuous(name = x_axis, breaks = c(0:(max(nuc1$tag))), labels = Times)+
+theme_classic() +
+  ggtitle("G1 cell foci expansion corrected mean object intensity per cell")
+volcorrMeanfociintG1
+ggsave("Refined_gH2AX_G1_cells.jpeg", plot = volcorrMeanfociintG1, width = 9, height = 5.25, units = "in")
+
+#Foci expansion value
+Foci_Expansion_FactorG1 <- ggplot(nucG1, aes(x=tag, y=Foci_Expansion_Factor, group=tag))+
+geom_jitter(data = nucG1, alpha = 0.5, colour = "red")+
+  scale_y_continuous(name = "Foci expansion factor")+
+  scale_x_continuous(name = x_axis, breaks = c(0:(max(nuc1$tag))), labels = Times)+
+theme_classic() +
+  ggtitle("Foci expansion factor for G1 cells")
+Foci_Expansion_FactorG1
+ggsave("Foci_expansion_factor_G1_cells.jpeg", plot = Foci_Expansion_FactorG1, width = 9, height = 5.25, units = "in")
+
+#For G2 Cells 
+#Plot the average foci intensity adjusted for nuclear volume.
+MeanfociintG2 <- ggplot(nucG2, aes(x=tag, y=Relative_Intensity, group=tag))+
+geom_jitter(data = nucG2, alpha = 0.25, colour = "red")+
+  geom_boxplot(fill = "red", alpha = 0.1, outlier.shape = NA)+
+  scale_y_continuous(name = "Signal")+
+  scale_x_continuous(name = x_axis, breaks = c(0:(max(nuc1$tag))), labels = Times)+
+theme_classic() +
+  ggtitle("Average G2 cell gH2AX foci integrated intensity per cell, adjusted for nuclear volume")
+MeanfociintG2
+ggsave("Ave_gH2AX_object_intensity_normalized_to_nuc_vol_G2_cells.jpeg", plot = MeanfociintG2, width = 9, height = 5.25, units = "in")
+
+#Plot the average foci intensity, corrected for foci expansion and adjusted for nuclear volume.
+volcorrMeanfociintG2 <- ggplot(nucG2, aes(x=tag, y=Refined_gH2AX, group=tag))+
+geom_jitter(data = nucG2, alpha = 0.25, colour = "red")+
+  geom_boxplot(fill = "red", alpha = 0.1, outlier.shape = NA)+
+  scale_y_continuous(name = "Refined gH2AX")+
+  scale_x_continuous(name = x_axis, breaks = c(0:(max(nuc1$tag))), labels = Times)+
+theme_classic() +
+  ggtitle("G2 cell foci expansion corrected mean object intensity per cell")
+volcorrMeanfociintG2
+ggsave("Refined_gH2AX_G2_cells.jpeg", plot = volcorrMeanfociintG2, width = 9, height = 5.25, units = "in")
+
+#Foci expansion value
+Foci_Expansion_FactorG2 <- ggplot(nucG2, aes(x=tag, y=Foci_Expansion_Factor, group=tag))+
+geom_jitter(data = nucG2, alpha = 0.25, colour = "red")+
+  scale_y_continuous(name = "Foci expansion factor")+
+  scale_x_continuous(name = x_axis, breaks = c(0:(max(nuc1$tag))), labels = Times)+
+theme_classic() +
+  ggtitle("Foci expansion factor for G2 cells")
+Foci_Expansion_FactorG2
+ggsave("Foci_expansion_factor_G2_cells.jpeg", plot = Foci_Expansion_FactorG2, width = 9, height = 5.25, units = "in")
+
+#For S Cells 
+#Plot the average foci intensity adjusted for nuclear volume.
+MeanfociintS <- ggplot(nucS, aes(x=tag, y=Relative_Intensity, group=tag))+
+geom_jitter(data = nucS, alpha = 0.25, colour = "red")+
+  geom_boxplot(fill = "red", alpha = 0.1, outlier.shape = NA)+
+  scale_y_continuous(name = "Signal")+
+  scale_x_continuous(name = x_axis, breaks = c(0:(max(nuc1$tag))), labels = Times)+
+theme_classic() +
+  ggtitle("Average S cell gH2AX foci integrated intensity per cell, adjusted for nuclear volume")
+MeanfociintS
+ggsave("Ave_gH2AX_object_intensity_normalized_to_nuc_vol_S-phase_cells.jpeg", plot = MeanfociintS, width = 9, height = 5.25, units = "in")
+
+#Plot the average foci intensity, corrected for foci expansion and adjusted for nuclear volume.
+volcorrMeanfociintS <- ggplot(nucS, aes(x=tag, y=Refined_gH2AX, group=tag))+
+geom_jitter(data = nucS, alpha = 0.25, colour = "red")+
+  geom_boxplot(fill = "red", alpha = 0.1, outlier.shape = NA)+
+  scale_y_continuous(name = "Refined gH2AX")+
+  scale_x_continuous(name = x_axis, breaks = c(0:(max(nuc1$tag))), labels = Times)+
+theme_classic() +
+  ggtitle("S-Phase cell foci expansion corrected mean object intensity per cell")
+volcorrMeanfociintS
+ggsave("Refined_gH2AX_S-phase_cells.jpeg", plot = volcorrMeanfociintS, width = 9, height = 5.25, units = "in")
+
+#Foci expansion value
+Foci_Expansion_FactorS <- ggplot(nucS, aes(x=tag, y=Foci_Expansion_Factor, group=tag))+
+geom_jitter(data = nucS, alpha = 0.25, colour = "red")+
+  scale_y_continuous(name = "Foci expansion factor")+
+  scale_x_continuous(name = x_axis, breaks = c(0:(max(nuc1$tag))), labels = Times)+
+theme_classic() +
+  ggtitle("Foci expansion factor for S-phase cells")
+Foci_Expansion_FactorS
+ggsave("Foci_expansion_factor_S-phase_cells.jpeg", plot = Foci_Expansion_FactorS, width = 9, height = 5.25, units = "in")
+
+rm(list = c("Meanfociint", "MeanfociintG1", "MeanfociintG2", "MeanfociintS", "volcorrMeanfociint", "volcorrMeanfociintG1","volcorrMeanfociintG2", "volcorrMeanfociintS", "Foci_Expansion_Factor", "Foci_Expansion_FactorG1", "Foci_Expansion_FactorG2", "Foci_Expansion_FactorS", "cellcycle_profile", "cellcycle_profile2")) #removes graphs from the global enivornment.
+detach_package(tidyverse); detach_package(ggplot2); detach_package(plyr)
+```
+##Step 9
+#Create a new data frame
+
+  1. To select for certain columns, there are two ways to do this 1) base R functionality requires the use of character vector function: nameofdataframe[, c("name of first column", "name of second column", "name of third column", etc.)] OR 2) the dplyr package's select function can be used. The command is simplified: select(nameofdataframe, name of first column, name of second column, etc.).
+
+  2. For the next few operations, need to include the "index" column as this helps identify each cell.
+ 
+  3. A note: To make the dplyr package commands easier to read, use chaining (%>%), which will reads as "then do this action". 
+
+```{r}
+#new dataframe to organize the desired data.
+library(tidyverse)
+tagandRelative_Intensity <- select(nuc2, Label, nuc.idx, tag, index, volume_pix, Average_Normalized_Intensity, Average_Object_Volume, Foci_Expansion_Factor, logFoci_Expansion_Factor, Relative_Intensity, Refined_gH2AX) %>% arrange(tag)  #select the column that are to be brought into the new data frame and organize them data by tag
+
+tagandRelative_IntensitynucG1 <- select(nucG1, Label, nuc.idx, tag, index, volume_pix, Average_Normalized_IntensityG1, Average_Object_VolumeG1, Foci_Expansion_Factor, logFoci_Expansion_Factor, Relative_Intensity, Refined_gH2AX) %>% arrange(tag) #repeating this for G1 cells
+
+tagandRelative_IntensitynucG2 <- select(nucG2, Label, nuc.idx, tag, index, volume_pix, Average_Normalized_IntensityG2, Average_Object_VolumeG2, Foci_Expansion_Factor, logFoci_Expansion_Factor, Relative_Intensity, Refined_gH2AX) %>% arrange(tag) #repeating this for G2 cells
+
+tagandRelative_IntensitynucS <- select(nucS, Label, nuc.idx, tag, index, volume_pix, Average_Normalized_IntensityS, Average_Object_VolumeS, Foci_Expansion_Factor, logFoci_Expansion_Factor, Relative_Intensity, Refined_gH2AX) %>% arrange(tag) #repeating this for G2 cells
+
+vol_pix <- select(NAgh2ax1, idx, tag, index, FiFaverage, volume_pix) %>% arrange(tag)
+vol_pixG1 <- select(NAgh2axG1, idx, tag, index, FiFaverage, volume_pix) %>% arrange(tag)
+vol_pixG2 <- select(NAgh2axG2, idx, tag, index, FiFaverage, volume_pix) %>% arrange(tag)
+vol_pixS <- select(NAgh2axS, idx, tag, index, FiFaverage, volume_pix) %>% arrange(tag)
+
+```
+##Step 10
+#Create a new, transposed data frame to save to files
+
+  1. Need to transpose the data, and have the columns of the new data frame be the numbers of the 'tag'. Will have to export each variable that we want to plot in GraphPad Prism, as its own dataset and label it as such. 
+  
+  2. Using the package reshape2 the data can be transposed specifically, such that 'tag' is a new column heading and our desired variable (i.e. Relative_Intensity) is listed by the index. This will generate a new table that has the same number of rows as in 'nuc' variable, if not then something is wrong. The command is acast(), organizes the data into vectors or matrixes, from the desired data frame (i.e. tagandRelative_Intensity), into row names 'index' and column names 'tag', with the variable inputted being 'value.var="Relative_Intensity"'. The "na.rm=FALSE" will put a NA into the rows where there are no values. This command also makes a new object, which we will call 'analyzedRelative_Intensity'.
+
+```{r}
+
+library(reshape2) #now load the reshape2 package
+
+#For the entire population
+
+analyzedlogFociExpFact <- acast(tagandRelative_Intensity, index~tag, value.var='logFoci_Expansion_Factor', na.rm = FALSE)
+colnames(analyzedlogFociExpFact) <-  c(Times)
+analyzedRelative_Intensity <- acast(tagandRelative_Intensity, index~tag, value.var='Relative_Intensity', na.rm = FALSE)
+colnames(analyzedRelative_Intensity) <-  c(Times)
+analyzedRefined_gH2AX <- acast(tagandRelative_Intensity, index~tag, value.var='Refined_gH2AX', na.rm = FALSE)
+colnames(analyzedRefined_gH2AX) <-  c(Times)
+analyzedAverage_Object_Volume <- acast(tagandRelative_Intensity, index~tag, value.var='Average_Object_Volume', na.rm = FALSE)
+colnames(analyzedAverage_Object_Volume) <-  c(Times)
+
+#For G1 cells
+analyzednucG1logFociExpFact <- acast(tagandRelative_IntensitynucG1, index~tag, value.var='logFoci_Expansion_Factor', na.rm = FALSE)
+colnames(analyzednucG1logFociExpFact) <-  c(Times)
+analyzednucG1Relative_Intensity <- acast(tagandRelative_IntensitynucG1, index~tag, value.var='Relative_Intensity', na.rm = FALSE)
+colnames(analyzednucG1Relative_Intensity) <-  c(Times)
+analyzednucG1Refined_gH2AX <- acast(tagandRelative_IntensitynucG1, index~tag, value.var='Refined_gH2AX', na.rm = FALSE)
+colnames(analyzednucG1Refined_gH2AX) <-  c(Times)
+analyzedAverage_Object_VolumeG1 <- acast(tagandRelative_IntensitynucG1, index~tag, value.var='Average_Object_VolumeG1', na.rm = FALSE)
+colnames(analyzedAverage_Object_VolumeG1) <-  c(Times)
+
+#For G2 cells
+analyzednucG2logFociExpFact <- acast(tagandRelative_IntensitynucG2, index~tag, value.var='logFoci_Expansion_Factor', na.rm = FALSE)
+colnames(analyzednucG2logFociExpFact) <-  c(Times)
+analyzednucG2Relative_Intensity <- acast(tagandRelative_IntensitynucG2, index~tag, value.var='Relative_Intensity', na.rm = FALSE)
+colnames(analyzednucG2Relative_Intensity) <-  c(Times)
+analyzednucG2Refined_gH2AX <- acast(tagandRelative_IntensitynucG2, index~tag, value.var='Refined_gH2AX', na.rm = FALSE)
+colnames(analyzednucG2Refined_gH2AX) <-  c(Times)
+analyzedAverage_Object_VolumeG2 <- acast(tagandRelative_IntensitynucG2, index~tag, value.var='Average_Object_VolumeG2', na.rm = FALSE)
+colnames(analyzedAverage_Object_VolumeG2) <-  c(Times)
+
+#For S cells
+analyzednucSlogFociExpFact <- acast(tagandRelative_IntensitynucS, index~tag, value.var='logFoci_Expansion_Factor', na.rm = FALSE)
+colnames(analyzednucSlogFociExpFact) <-  c(Times)
+analyzednucSRelative_Intensity <- acast(tagandRelative_IntensitynucS, index~tag, value.var='Relative_Intensity', na.rm = FALSE)
+colnames(analyzednucSRelative_Intensity) <-  c(Times)
+analyzednucSRefined_gH2AX <- acast(tagandRelative_IntensitynucS, index~tag, value.var='Refined_gH2AX', na.rm = FALSE)
+colnames(analyzednucSRefined_gH2AX) <-  c(Times)
+analyzedAverage_Object_VolumeS <- acast(tagandRelative_IntensitynucS, index~tag, value.var='Average_Object_VolumeS', na.rm = FALSE)
+colnames(analyzedAverage_Object_VolumeS) <-  c(Times)
+
+volume_pix <- acast(vol_pix, index+idx~tag, value.var='volume_pix', na.rm = FALSE)
+colnames(volume_pix) <-  c(Times)
+volume_pixG1 <- acast(vol_pixG1, index+idx~tag, value.var='volume_pix', na.rm = FALSE)
+colnames(volume_pixG1) <-  c(Times)
+volume_pixG2 <- acast(vol_pixG2, index+idx~tag, value.var='volume_pix', na.rm = FALSE)
+colnames(volume_pixG2) <-  c(Times)
+volume_pixS <- acast(vol_pixS, index+idx~tag, value.var='volume_pix', na.rm = FALSE)
+colnames(volume_pixS) <-  c(Times)
+
+```
+#Save files to current working directory
+
+```{r}
+
+write.csv(analyzedlogFociExpFact, file = "log_Foci_Expansion_Factor_all_cells.csv", row.names = TRUE, col.names = TRUE)
+write.csv(analyzedRelative_Intensity, file = "Relative_Normalized_Intensity_all_cells.csv", row.names = TRUE, col.names = TRUE)
+write.csv(analyzedRefined_gH2AX, file = "Refined_gH2AX_all_cells.csv", row.names = TRUE, col.names = TRUE)
+write.csv(analyzedAverage_Object_Volume, file = "Mean_gH2AX_Object_vol_all_cells.csv", row.names = TRUE, col.names = TRUE)
+
+write.csv(analyzednucG1logFociExpFact, file = "log_Foci_Expansion_Factor_G1_cells.csv", row.names = TRUE, col.names = TRUE)
+write.csv(analyzednucG1Relative_Intensity, file = "Relative_Normalized_Intensity_G1_cells.csv", row.names = TRUE, col.names = TRUE)
+write.csv(analyzednucG1Refined_gH2AX, file = "Refined_gH2AX_G1_cells.csv", row.names = TRUE, col.names = TRUE)
+write.csv(analyzedAverage_Object_VolumeG1, file = "Mean_gH2AX_Object_vol_G1_cells.csv", row.names = TRUE, col.names = TRUE)
+
+write.csv(analyzednucG2logFociExpFact, file = "log_Foci_Expansion_Factor_G2_cells.csv", row.names = TRUE, col.names = TRUE)
+write.csv(analyzednucG2Relative_Intensity, file = "Relative_Normalized_Intensity_G2_cells.csv", row.names = TRUE, col.names = TRUE)
+write.csv(analyzednucG2Refined_gH2AX, file = "Refined_gH2AX_G2_cells.csv", row.names = TRUE, col.names = TRUE)
+write.csv(analyzedAverage_Object_VolumeG2, file = "Mean_gH2AX_Object_vol_G2_cells.csv", row.names = TRUE, col.names = TRUE)
+
+write.csv(analyzednucSlogFociExpFact, file = "log_Foci_Expansion_Factor_S-phase_cells.csv", row.names = TRUE, col.names = TRUE)
+write.csv(analyzednucSRelative_Intensity, file = "Relative_Normalized_Intensity_S-phase_cells.csv", row.names = TRUE, col.names = TRUE)
+write.csv(analyzednucSRefined_gH2AX, file = "Refined_gH2AX_S-phase_cells.csv", row.names = TRUE, col.names = TRUE)
+write.csv(analyzedAverage_Object_VolumeS, file = "Mean_gH2AX_Object_vol_S-phase_cells.csv", row.names = TRUE, col.names = TRUE)
+
+write.csv(volume_pix, file = "gH2AX_Object_vol_all_cells.csv", row.names = TRUE, col.names = TRUE) 
+write.csv(volume_pixG1, file = "gH2AX_Object_vol_G1_cells.csv", row.names = TRUE, col.names = TRUE)
+write.csv(volume_pixG2, file = "gH2AX_Object_vol_G2_cells.csv", row.names = TRUE, col.names = TRUE)
+write.csv(volume_pixS, file = "gH2AX_Object_vol_S-phase_cells.csv", row.names = TRUE, col.names = TRUE)
+
+detach_package(tidyverse); detach_package(reshape2); detach_package(plyr); detach_package(svDialogs); detach_package(readxl)
+```
